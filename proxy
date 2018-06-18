@@ -1,0 +1,259 @@
+#!/bin/bash
+clear
+myconfig=~/.proxy
+myhostname=`hostname`
+backtitle="Proxy Switcher for Mac OSX (`echo $myhostname`)"
+
+if [ ! -f $myconfig ]; then
+   touch $myconfig
+fi
+
+
+submenu () {
+   case "$1" in
+	1)
+		proxyret=$(cat $myconfig | cut -d "=" -f 1 | awk -F\; '{print FNR" \""$1"\""}' | xargs dialog \
+			--stdout \
+			--title "Enable Proxy" \
+			--backtitle "$backtitle" \
+			--no-cancel \
+			--menu "Please choose an option" 15 80 10 \
+			)
+			cat $myconfig | awk -F\; '{print FNR" "$1""}' | while read proxy
+			do
+				proxyid=`echo "$proxy" | cut -d " " -f 1`
+				proxystr=`echo "$proxy" | cut -d " " -f 2-`
+				if [ "$proxyid" == "$proxyret" ]; then
+					newproxy=`echo $proxystr | cut -d "=" -f 2-`
+					newproxyname=`echo "$newproxy" | cut -d " " -f 1`
+					newproxyport=`echo "$newproxy" | cut -d " " -f 2`
+					newproxyuser=`echo "$newproxy" | cut -d " " -f 3`
+					newproxypass=`echo "$newproxy" | cut -d " " -f 4`
+					if [ "$newproxyuser" == "" ]; then
+						newproxystr="http://$newproxyname:$newproxyport/"
+						newproxyauth="off"
+					else
+						newproxystr="http://$newproxyuser:$newproxypass@$newproxyname:$newproxyport/"
+						newproxyauth="on"
+					fi
+					export HTTP_PROXY=$newproxystr
+					export HTTPS_PROXY=$HTTP_PROXY
+					services=`scutil<< EOF
+						list
+						quit
+						EOF`
+                                        echo $services | grep -Eo "(State|Setup):/([a-zA-Z0-9/\.-]+)/Proxies" | while read svc
+                                        do
+                                                results=`sudo scutil<< EOF
+                                                        d.init
+                                                        get $svc
+                                                        d.add ProxyAutoConfigEnable 0
+                                                        set $svc
+							d.show
+                                                        quit
+                                                        EOF`
+                                        done
+					networksetup -listallnetworkservices | grep -v "An" | while read service
+					do
+						sudo networksetup -setwebproxy "$service" "$newproxyname" "$newproxyport" "$newproxyauth" "$newproxyuser" "$newproxypass"
+						sudo networksetup -setsecurewebproxy "$service" "$newproxyname" "$newproxyport" "$newproxyauth" "$newproxyuser" "$newproxypass"
+						sudo networksetup -setwebproxystate "$service" on
+						sudo networksetup -setsecurewebproxystate "$service" on
+					done
+                                        echo $services | grep -Eo "(State|Setup):/([a-zA-Z0-9/\.-]+)/Proxies" | while read svc
+                                        do
+                                                results=`sudo scutil<< EOF
+                                                        d.init
+                                                        get $svc
+                                                        d.add ProxyAutoConfigEnable 0
+							d.add FTPPassive 1
+							d.add HTTPEnable 1
+							d.add HTTPPort $newproxyport
+							d.add HTTPProxy $newproxyname
+							d.add HTTPSEnable 1
+							d.add HTTPSPort $newproxyport
+							d.add HTTPSProxy $newproxyname
+                                                        #set $svc
+                                                        d.show
+                                                        quit
+                                                        EOF`
+                                        done
+				fi
+			done
+	;;
+	2)
+		export HTTP_PROXY=
+		export HTTPS_PROXY=
+		networksetup -listallnetworkservices | grep -v "An" | while read service
+		do
+			sudo networksetup -setwebproxystate "$service" off
+			sudo networksetup -setsecurewebproxystate "$service" off
+		done
+		services=`scutil<< EOF
+			list
+			quit
+			EOF`
+		echo $services | grep -Eo "(State|Setup):/([a-zA-Z0-9/\.-]+)/Proxies" | while read svc
+		do
+			results=`sudo scutil<< EOF
+				d.init
+				get $svc
+				d.add FTPPassive 0
+				d.add HTTPEnable 0
+				d.add HTTPSEnable 0
+				set $svc
+				quit
+				EOF`
+		done
+	;;
+	3)
+		proxystr=$(dialog --stdout --title "Add Proxy Configuration" \
+			--backtitle "$backtitle" \
+			--inputbox "Enter Configuration NAme" 8 50)
+		case $? in
+			0)
+				#Pressed OK
+				newproxystr="$proxystr"
+				submenu 301
+				;;
+			*)
+				#Aborted
+				;;
+		esac
+	;;
+	301)
+                proxystr=$(dialog --stdout --title "Add Proxy Configuration" \
+                        --backtitle "$backtitle" \
+                        --inputbox "Enter Proxy Address" 8 50)
+                case $? in
+                        0)
+                                #Pressed OK
+                                newproxyname="$proxystr"
+                                submenu 302
+                                ;;
+                        *)
+                                #Aborted
+                                ;;
+                esac
+	;;
+        302)
+                proxystr=$(dialog --stdout --title "Add Proxy Configuration" \
+                        --backtitle "$backtitle" \
+                        --inputbox "Enter Proxy Port" 8 50)
+                case $? in
+                        0)
+                                #Pressed OK
+                                newproxyport="$proxystr"
+                                submenu 303
+                                ;;
+                        *)
+                                #Aborted
+                                ;;
+                esac
+        ;;
+        303)
+                proxystr=$(dialog --stdout --title "Add Proxy Configuration" \
+                        --backtitle "$backtitle" \
+                        --inputbox "Enter Proxy User" 8 50)
+                case $? in
+                        0)
+                                #Pressed OK
+                                newproxyuser="$proxystr"
+                                submenu 304
+                                ;;
+                        *)
+                                #Aborted
+                                ;;
+                esac
+        ;;
+        304)
+                proxystr=$(dialog --stdout --title "Add Proxy Configuration" \
+                        --backtitle "$backtitle" \
+                        --inputbox "Enter Proxy Password" 8 50)
+                case $? in
+                        0)
+                                #Pressed OK
+                                echo "$newproxystr=$newproxyname $newproxyport $newproxyuser $proxystr" >> $myconfig
+                                ;;
+                        *)
+                                #Aborted
+                                ;;
+                esac
+        ;;
+	4)
+		services=`scutil<< EOF
+			list
+			quit
+			EOF`
+		echo $services | grep -Eo "(State|Setup):/([a-zA-Z0-9/\.-]+)/Proxies" | while read svc
+		do
+			results=`sudo scutil<< EOF
+				d.init
+				get $svc
+				d.add ProxyAutoConfigEnable 0
+				set $svc
+				quit
+				EOF`
+		done
+	;;
+	5)
+		services=`scutil<< EOF
+			list
+			quit
+			EOF`
+		echo $services | grep -Eo "State:/Network/Service/net.pulsesecure.pulse.nc.main/Proxies" | while read svc
+		do
+			results=`sudo scutil<< EOF
+				d.init
+				get $svc
+				d.add ProxyAutoConfigEnable 1
+				d.add ProxyAutoConfigURLString file:///Users/brecht/proxy.pac
+				d.remove HTTPEnable
+				d.remove HTTPSEnable
+				d.remove FTPPassive
+				set $svc
+				quit
+				EOF`
+				sleep 3
+		done
+	;;
+	6)
+		pulseSecureState=`scutil << EOF
+			show State:/Network/Service/net.pulsesecure.pulse.nc.main/IPv4
+			quit
+			EOF`
+		serviceKey=`echo $pulseSecureState | sed -n "s/.*DSUnderlyingServiceName : \([^']*\) }.*/\1/p"`
+		results=`sudo scutil<< EOF
+			d.init
+			get Setup:/Network/Service/${serviceKey}/Proxies
+			set State:/Network/Service/net.pulsesecure.pulse.nc.main/Proxies
+			d.add ProxyAutoConfigEnable 0
+			set State:/Network/Global/Proxies
+			quit
+			EOF`
+	;;
+   esac
+}
+
+exitcode=-1
+while [ $exitcode -lt 0 ]; do
+   ret=$(dialog --stdout --title "Main Menu" \
+	--backtitle "$backtitle" \
+	--no-cancel \
+	--menu "Please choose an option" 15 80 10 \
+	1 "Enable Proxy" \
+	2 "Disable Proxy" \
+	3 "Add Proxy" \
+	4 "Disable Proxy Script" \
+	5 "Enable Proxy Script" \
+	6 "Clear Pulse Proxy Modifications" \
+	0 "Exit" \
+	)
+   if [ $ret -eq 0 ] || [ $? -eq 255 ]
+   then
+	exitcode=0
+   else
+	submenu $ret
+   fi
+done
+clear
